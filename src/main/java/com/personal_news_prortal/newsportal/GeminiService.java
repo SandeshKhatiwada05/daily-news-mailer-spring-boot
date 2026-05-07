@@ -41,6 +41,8 @@ public class GeminiService {
 
         String rawJson = responseBody.string();
 
+        System.out.println("GEMINI RESPONSE: " + rawJson);
+
         // Parse Gemini response to extract generated text
         JSONObject root = new JSONObject(rawJson);
 
