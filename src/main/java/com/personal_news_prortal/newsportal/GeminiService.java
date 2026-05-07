@@ -10,12 +10,12 @@ import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.io.FileOutputStream;
-import java.util.concurrent.TimeUnit; // Import this!
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class GeminiService {
 
-    // 1. Create a client with long timeouts (60-90 seconds)
+    // Increased timeouts to 90s because Gemini 3 takes a second to "think"
     private final OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
@@ -34,13 +34,12 @@ public class GeminiService {
                 MediaType.parse("application/json")
         );
 
-        // 2. Using 'gemini-1.5-flash' which is the stable target for v1beta right now
+        // MODEL UPDATE: gemini-3-flash-preview is the current 2026 free-tier workhorse
         Request request = new Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + apiKey)
+                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=" + apiKey)
                 .post(body)
                 .build();
 
-        // 3. The execution now uses the custom 'client' defined above
         Response response = client.newCall(request).execute();
 
         ResponseBody responseBody = response.body();
@@ -49,12 +48,12 @@ public class GeminiService {
         }
 
         String rawJson = responseBody.string();
-
         System.out.println("GEMINI RESPONSE: " + rawJson);
 
         JSONObject root = new JSONObject(rawJson);
 
         if (!root.has("candidates")) {
+            // This will help us see if it's a safety block or a quota issue
             throw new RuntimeException("Gemini error: " + rawJson);
         }
 
@@ -66,7 +65,6 @@ public class GeminiService {
                 .getJSONObject(0)
                 .getString("text");
 
-        // Write to PDF
         File pdf = new File("daily-news.pdf");
         Document document = new Document();
         PdfWriter.getInstance(document, new FileOutputStream(pdf));
