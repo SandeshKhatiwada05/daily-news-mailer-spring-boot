@@ -1,0 +1,31 @@
+name: Daily News
+
+on:
+  schedule:
+#    - cron: '15 0 * * *'
+    - cron: '15 15 * * *'  # 21:00 NPT
+  workflow_dispatch:
+
+jobs:
+  run-news-bot:
+
+    runs-on: ubuntu-latest
+
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+      MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Run App
+        run: mvn spring-boot:run -q
