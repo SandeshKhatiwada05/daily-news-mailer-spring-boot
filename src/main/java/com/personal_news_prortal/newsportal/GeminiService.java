@@ -28,7 +28,7 @@ public class GeminiService {
         );
 
         Request request = new Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=" + apiKey)
+                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + apiKey)
                 .post(body)
                 .build();
 
