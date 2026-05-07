@@ -2,14 +2,14 @@ name: Daily News
 
 on:
   schedule:
-    - cron: '00 16 * * *'   # 21:45 NPT
+    - cron: '10 16 * * *'
     - cron: '15 0  * * *'   # 06:00 NPT
   workflow_dispatch:
 
 jobs:
   run-news-bot:
-
     runs-on: ubuntu-latest
+    environment: GEMINI_API_KEY  # add this line
 
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

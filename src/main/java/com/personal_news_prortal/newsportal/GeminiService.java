@@ -43,6 +43,12 @@ public class GeminiService {
 
         // Parse Gemini response to extract generated text
         JSONObject root = new JSONObject(rawJson);
+
+        //check for errors
+        if (!root.has("candidates")) {
+            throw new RuntimeException("Gemini error: " + rawJson);
+        }
+
         JSONArray candidates = root.getJSONArray("candidates");
         String newsText = candidates
                 .getJSONObject(0)
