@@ -3,6 +3,7 @@ package com.personal_news_prortal.newsportal;
 import com.lowagie.text.*;
 import com.lowagie.text.Font;
 import com.lowagie.text.pdf.*;
+import com.lowagie.text.pdf.draw.LineSeparator;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
