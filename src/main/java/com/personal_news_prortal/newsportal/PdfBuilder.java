@@ -2,7 +2,6 @@ package com.personal_news_prortal.newsportal;
 
 import com.lowagie.text.*;
 import com.lowagie.text.Font;
-import com.lowagie.text.Rectangle;
 import com.lowagie.text.pdf.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -14,65 +13,70 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 
 /**
- * Builds a beautiful, professional-grade PDF from structured JSON news data.
- * No markdown parsing. Full layout control.
+ * Builds a beautiful PDF matching the light cream/tan design from the reference image.
+ *
+ * Palette from reference:
+ *   #E8DDB4  warm cream  — page background
+ *   #767F9E  slate-blue  — cards / inset panels
+ *   #DAA464  warm gold   — accents, date bar, section labels
+ *   #DEC384  light tan   — secondary accent, PLAIN ENGLISH badge
+ *
+ * Layout: every story gets its own full page (one-story-per-page).
  */
 public class PdfBuilder {
 
-    // ── Color Palette ────────────────────────────────────────────────────────
-    private static final Color COLOR_BG_DARK       = new Color(15, 20, 35);      // near-black navy
-    private static final Color COLOR_ACCENT_GOLD   = new Color(212, 175, 55);    // gold
-    private static final Color COLOR_ACCENT_BLUE   = new Color(64, 156, 255);    // electric blue
-    private static final Color COLOR_ACCENT_RED    = new Color(220, 60, 60);     // alert red
-    private static final Color COLOR_ACCENT_GREEN  = new Color(50, 200, 120);    // verified green
-    private static final Color COLOR_TEXT_PRIMARY  = new Color(240, 240, 245);   // near-white
-    private static final Color COLOR_TEXT_SECONDARY = new Color(170, 175, 195);  // muted
-    private static final Color COLOR_CARD_BG       = new Color(28, 35, 55);      // card dark
-    private static final Color COLOR_SEPARATOR     = new Color(45, 55, 80);      // subtle line
+    // ── Palette ──────────────────────────────────────────────────────────────
+    private static final Color C_PAGE_BG   = new Color(232, 221, 180);   // #E8DDB4
+    private static final Color C_CARD      = new Color(118, 127, 158);   // #767F9E
+    private static final Color C_GOLD      = new Color(218, 164, 100);   // #DAA464
+    private static final Color C_TAN       = new Color(222, 195, 132);   // #DEC384
+    private static final Color C_TEXT_DARK = new Color(38,  38,  38);    // body text on light bg
+    private static final Color C_TEXT_MID  = new Color(65,  65,  65);    // secondary body
+    private static final Color C_TEXT_LITE = new Color(245, 240, 232);   // text on dark card bg
+    private static final Color C_MUTED     = new Color(105, 100,  90);   // sources / footer
+    private static final Color C_RULE      = new Color(200, 188, 148);   // separator lines
 
-    private static final Color[] SECTION_COLORS = {
-            new Color(64, 156, 255),   // global — blue
-            new Color(255, 140, 50),   // nepal  — orange
-            new Color(120, 200, 80)    // tech   — green
-    };
+    private static final Color[] SECTION_ACCENT = { C_GOLD, C_TAN, new Color(195, 170, 100) };
 
-    // ── Fonts ────────────────────────────────────────────────────────────────
-    private static Font font(String base, int size, int style, Color color) {
+    // ── Font helper ───────────────────────────────────────────────────────────
+    private static Font f(String base, float size, int style, Color color) {
         return FontFactory.getFont(base, size, style, color);
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    // ENTRY POINT
+    // ═════════════════════════════════════════════════════════════════════════
     public static File build(JSONObject data) throws Exception {
         File pdf = new File("daily-news.pdf");
-        Document doc = new Document(PageSize.A4, 45, 45, 50, 60);
-
+        Document doc = new Document(PageSize.A4, 50, 50, 55, 65);
         PdfWriter writer = PdfWriter.getInstance(doc, new FileOutputStream(pdf));
-        writer.setPageEvent(new PageDecorator()); // footer + page numbers
-
+        writer.setPageEvent(new FooterPainter());
         doc.open();
 
         String date = data.optString("date",
                 LocalDate.now().format(DateTimeFormatter.ofPattern("MMMM d, yyyy")));
 
-        // ── Cover Page ───────────────────────────────────────────────────────
-        addCoverPage(doc, writer, date);
+        addCover(doc, writer, date);
         doc.newPage();
 
-        // ── Table of Contents ────────────────────────────────────────────────
-        addTableOfContents(doc, writer);
+        addToc(doc, writer);
         doc.newPage();
 
-        // ── Sections ─────────────────────────────────────────────────────────
         JSONArray sections = data.getJSONArray("sections");
         for (int s = 0; s < sections.length(); s++) {
             JSONObject section = sections.getJSONObject(s);
-            Color accent = SECTION_COLORS[Math.min(s, SECTION_COLORS.length - 1)];
-            addSection(doc, writer, section, accent, s + 1);
+            Color accent = SECTION_ACCENT[Math.min(s, SECTION_ACCENT.length - 1)];
+            String sectionTitle = section.optString("title", "News");
+            JSONArray stories = section.getJSONArray("stories");
+            for (int i = 0; i < stories.length(); i++) {
+                addStoryPage(doc, writer, stories.getJSONObject(i),
+                        i + 1, sectionTitle, accent, date);
+                doc.newPage();
+            }
         }
 
-        // ── Biggest Stories ───────────────────────────────────────────────────
         if (data.has("biggest_stories")) {
-            doc.newPage();
-            addBiggestStories(doc, writer, data.getJSONObject("biggest_stories"));
+            addBiggestPage(doc, writer, data.getJSONObject("biggest_stories"));
         }
 
         doc.close();
@@ -80,387 +84,365 @@ public class PdfBuilder {
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // COVER PAGE
+    // COVER
     // ═════════════════════════════════════════════════════════════════════════
-    private static void addCoverPage(Document doc, PdfWriter writer, String date) throws Exception {
+    private static void addCover(Document doc, PdfWriter writer, String date) throws Exception {
+        paintBg(writer);
         PdfContentByte cb = writer.getDirectContent();
-        float w = doc.getPageSize().getWidth();
-        float h = doc.getPageSize().getHeight();
+        float w = PageSize.A4.getWidth();
+        float h = PageSize.A4.getHeight();
 
-        // Full background
-        cb.setColorFill(COLOR_BG_DARK);
-        cb.rectangle(0, 0, w, h);
+        // Gold top + bottom strips
+        cb.setColorFill(C_GOLD);
+        cb.rectangle(0, h - 7, w, 7);
+        cb.fill();
+        cb.setColorFill(C_GOLD);
+        cb.rectangle(0, 0, w, 7);
         cb.fill();
 
-        // Gold top bar
-        cb.setColorFill(COLOR_ACCENT_GOLD);
-        cb.rectangle(0, h - 8, w, 8);
+        // Central slate card
+        float cx = 55, cy = h * 0.26f, cw = w - 110, ch = h * 0.48f;
+        cb.setColorFill(C_CARD);
+        cb.roundRectangle(cx, cy, cw, ch, 10);
         cb.fill();
 
-        // Bottom bar
-        cb.setColorFill(COLOR_ACCENT_GOLD);
-        cb.rectangle(0, 0, w, 5);
+        // Gold accent bar at top of card
+        cb.setColorFill(C_GOLD);
+        cb.roundRectangle(cx, cy + ch - 7, cw, 7, 4);
         cb.fill();
 
-        // Left accent stripe
-        cb.setColorFill(new Color(COLOR_ACCENT_GOLD.getRed(),
-                COLOR_ACCENT_GOLD.getGreen(),
-                COLOR_ACCENT_GOLD.getBlue(), 60));
-        cb.rectangle(0, 0, 6, h);
-        cb.fill();
-
-        // Center box
-        float bx = 60, by = h * 0.3f, bw = w - 120, bh = h * 0.4f;
-        cb.setColorFill(COLOR_CARD_BG);
-        roundRect(cb, bx, by, bw, bh, 12);
-        cb.fill();
-
-        // Gold line inside box
-        cb.setColorFill(COLOR_ACCENT_GOLD);
-        cb.rectangle(bx + 30, by + bh - 4, bw - 60, 3);
-        cb.fill();
-
-        // Title text — use ColumnText for precise placement
         ColumnText ct = new ColumnText(cb);
-        ct.setSimpleColumn(bx + 20, by, bx + bw - 20, by + bh - 10);
-        ct.setAlignment(Element.ALIGN_CENTER);
+        ct.setSimpleColumn(cx + 28, cy + 10, cx + cw - 28, cy + ch - 20);
 
-        ct.addElement(spacer(40));
-        ct.addElement(para("DAILY INTELLIGENCE REPORT",
-                font(FontFactory.HELVETICA_BOLD, 26, Font.BOLD, COLOR_ACCENT_GOLD),
-                Element.ALIGN_CENTER));
-        ct.addElement(spacer(8));
-        ct.addElement(para("Your curated briefing — 30 stories across 3 domains",
-                font(FontFactory.HELVETICA, 11, Font.ITALIC, COLOR_TEXT_SECONDARY),
-                Element.ALIGN_CENTER));
-        ct.addElement(spacer(20));
-        ct.addElement(hRule(cb, (int)(bw - 60)));
-        ct.addElement(spacer(20));
-        ct.addElement(para(date.toUpperCase(),
-                font(FontFactory.HELVETICA_BOLD, 14, Font.BOLD, COLOR_TEXT_PRIMARY),
-                Element.ALIGN_CENTER));
-        ct.addElement(spacer(16));
+        ct.addElement(spacer(24));
 
-        // Section badges
-        Phrase badges = new Phrase();
-        addBadge(badges, "  GLOBAL  ", SECTION_COLORS[0]);
-        addBadge(badges, "  NEPAL   ", SECTION_COLORS[1]);
-        addBadge(badges, "  TECH    ", SECTION_COLORS[2]);
-        Paragraph badgePara = new Paragraph(badges);
-        badgePara.setAlignment(Element.ALIGN_CENTER);
-        ct.addElement(badgePara);
+        Paragraph t1 = new Paragraph("DAILY INTELLIGENCE REPORT",
+                f(FontFactory.HELVETICA_BOLD, 21, Font.BOLD, C_GOLD));
+        t1.setAlignment(Element.ALIGN_CENTER);
+        ct.addElement(t1);
+
+        ct.addElement(spacer(5));
+
+        Paragraph t2 = new Paragraph("30 stories  ·  Global  ·  Nepal  ·  Technology",
+                f(FontFactory.HELVETICA, 10, Font.ITALIC, C_TAN));
+        t2.setAlignment(Element.ALIGN_CENTER);
+        ct.addElement(t2);
+
+        ct.addElement(spacer(18));
+        ct.addElement(new Chunk(new LineSeparator(0.5f, 65, C_TAN, Element.ALIGN_CENTER, 0)));
+        ct.addElement(spacer(18));
+
+        Paragraph dp = new Paragraph(date.toUpperCase(),
+                f(FontFactory.HELVETICA_BOLD, 12, Font.BOLD, C_TEXT_LITE));
+        dp.setAlignment(Element.ALIGN_CENTER);
+        ct.addElement(dp);
+
+        ct.addElement(spacer(14));
+
+        Paragraph tag = new Paragraph("Curated  ·  Verified  ·  Delivered Daily",
+                f(FontFactory.HELVETICA, 9, Font.ITALIC, C_TAN));
+        tag.setAlignment(Element.ALIGN_CENTER);
+        ct.addElement(tag);
 
         ct.go();
 
-        // Bottom tagline
-        ColumnText bottom = new ColumnText(cb);
-        bottom.setSimpleColumn(0, 20, w, 55);
-        bottom.addElement(para("Powered by Gemini AI  ·  Generated automatically",
-                font(FontFactory.HELVETICA, 9, Font.ITALIC, COLOR_TEXT_SECONDARY),
-                Element.ALIGN_CENTER));
-        bottom.go();
+        ColumnText.showTextAligned(cb, Element.ALIGN_CENTER,
+                new Phrase("Powered by Gemini AI  ·  Auto-generated",
+                        f(FontFactory.HELVETICA, 7, Font.ITALIC, C_MUTED)),
+                w / 2, 18, 0);
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // TABLE OF CONTENTS (simple)
+    // TABLE OF CONTENTS
     // ═════════════════════════════════════════════════════════════════════════
-    private static void addTableOfContents(Document doc, PdfWriter writer) throws Exception {
-        PdfContentByte cb = writer.getDirectContent();
-        float w = doc.getPageSize().getWidth();
+    private static void addToc(Document doc, PdfWriter writer) throws Exception {
+        paintBg(writer);
+        paintTopBar(writer, "TABLE OF CONTENTS", C_GOLD);
+        doc.add(spacer(44));
 
-        addPageHeader(cb, "TABLE OF CONTENTS", COLOR_ACCENT_GOLD, w);
-
-        doc.add(spacer(50));
-
-        String[][] entries = {
-                {"1", "Global News", "10 stories — geopolitics, economy, diplomacy"},
-                {"2", "Nepal News", "10 stories — politics, infrastructure, policy"},
-                {"3", "Technology & Coding", "10 stories — AI, dev tools, cybersecurity"},
-                {"4", "Today's Biggest Stories", "Top story per section"},
+        String[][] rows = {
+                {"Section 1", "Global News",          "10 stories — geopolitics, economy, wars, diplomacy"},
+                {"Section 2", "Nepal News",            "10 stories — politics, infrastructure, public policy"},
+                {"Section 3", "Technology & Coding",   "10 stories — AI, dev tools, security, open source"},
+                {"Final",     "Today's Biggest Stories","Top headline per section, briefly explained"},
         };
+        Color[] ec = { SECTION_ACCENT[0], SECTION_ACCENT[1], SECTION_ACCENT[2], C_GOLD };
 
-        Color[] entryColors = {SECTION_COLORS[0], SECTION_COLORS[1], SECTION_COLORS[2], COLOR_ACCENT_GOLD};
+        for (int i = 0; i < rows.length; i++) {
+            PdfPTable t = new PdfPTable(new float[]{0.22f, 0.78f});
+            t.setWidthPercentage(95);
+            t.setSpacingBefore(10);
 
-        for (int i = 0; i < entries.length; i++) {
-            addTocEntry(doc, entries[i][0], entries[i][1], entries[i][2], entryColors[i]);
+            PdfPCell lc = new PdfPCell();
+            lc.setBackgroundColor(ec[i]);
+            lc.setBorder(PdfPCell.NO_BORDER);
+            lc.setPadding(10);
+            Paragraph np = new Paragraph(rows[i][0],
+                    f(FontFactory.HELVETICA_BOLD, 10, Font.BOLD, C_TEXT_DARK));
+            np.setAlignment(Element.ALIGN_CENTER);
+            lc.addElement(np);
+            t.addCell(lc);
+
+            PdfPCell rc = new PdfPCell();
+            rc.setBackgroundColor(C_CARD);
+            rc.setBorder(PdfPCell.NO_BORDER);
+            rc.setPadding(10);
+            rc.addElement(new Paragraph(rows[i][1],
+                    f(FontFactory.HELVETICA_BOLD, 12, Font.BOLD, C_TEXT_LITE)));
+            rc.addElement(new Paragraph(rows[i][2],
+                    f(FontFactory.HELVETICA, 9, Font.ITALIC, C_TAN)));
+            t.addCell(rc);
+
+            doc.add(t);
         }
     }
 
-    private static void addTocEntry(Document doc, String num, String title, String sub, Color color) throws Exception {
-        PdfPTable table = new PdfPTable(new float[]{0.08f, 0.92f});
-        table.setWidthPercentage(90);
-        table.setSpacingBefore(12);
-
-        // Number badge cell
-        PdfPCell numCell = new PdfPCell();
-        numCell.setBackgroundColor(color);
-        numCell.setBorder(Rectangle.NO_BORDER);
-        numCell.setPadding(8);
-        Paragraph np = new Paragraph(num, font(FontFactory.HELVETICA_BOLD, 14, Font.BOLD, Color.WHITE));
-        np.setAlignment(Element.ALIGN_CENTER);
-        numCell.addElement(np);
-        table.addCell(numCell);
-
-        // Title cell
-        PdfPCell titleCell = new PdfPCell();
-        titleCell.setBackgroundColor(COLOR_CARD_BG);
-        titleCell.setBorder(PdfPCell.NO_BORDER);
-        titleCell.enableBorderSide(PdfPCell.LEFT);
-        titleCell.setBorderColorLeft(color);
-        titleCell.setBorderWidthLeft(3);
-        titleCell.setPadding(8);
-        titleCell.addElement(new Paragraph(title,
-                font(FontFactory.HELVETICA_BOLD, 13, Font.BOLD, COLOR_TEXT_PRIMARY)));
-        titleCell.addElement(new Paragraph(sub,
-                font(FontFactory.HELVETICA, 10, Font.ITALIC, COLOR_TEXT_SECONDARY)));
-        table.addCell(titleCell);
-
-        doc.add(table);
-    }
-
     // ═════════════════════════════════════════════════════════════════════════
-    // SECTION
+    // STORY PAGE  — one full page per story, matching reference image
     // ═════════════════════════════════════════════════════════════════════════
-    private static void addSection(Document doc, PdfWriter writer,
-                                   JSONObject section, Color accent, int sectionNum) throws Exception {
-        doc.newPage();
+    private static void addStoryPage(Document doc, PdfWriter writer,
+                                     JSONObject story, int num,
+                                     String sectionTitle, Color accent, String date) throws Exception {
+        paintBg(writer);
         PdfContentByte cb = writer.getDirectContent();
-        float w = doc.getPageSize().getWidth();
+        float w = PageSize.A4.getWidth();
+        float h = PageSize.A4.getHeight();
+        float lm = 50, rm = 50;
 
-        String title = section.optString("title", "Section " + sectionNum);
-        addPageHeader(cb, "SECTION " + sectionNum + " — " + title, accent, w);
-        doc.add(spacer(50));
+        // ── Meta line: DATE · SECTION · DAILY REPORT ─────────────────────────
+        // Matches image top-left gold small-caps line
+        ColumnText.showTextAligned(cb, Element.ALIGN_LEFT,
+                new Phrase(date.toUpperCase() + "  ·  " + sectionTitle.toUpperCase() + "  ·  DAILY REPORT",
+                        f(FontFactory.HELVETICA_BOLD, 7, Font.BOLD, C_GOLD)),
+                lm, h - 32, 0);
 
-        JSONArray stories = section.getJSONArray("stories");
-        for (int i = 0; i < stories.length(); i++) {
-            addStoryCard(doc, stories.getJSONObject(i), i + 1, accent);
-            if (i < stories.length() - 1) {
-                doc.add(spacer(6));
-            }
-        }
+        // ── Headline ─────────────────────────────────────────────────────────
+        // Placed just below meta line, large bold dark text
+        ColumnText headCt = new ColumnText(cb);
+        headCt.setSimpleColumn(lm, h - 115, w - rm, h - 42);
+        Paragraph headline = new Paragraph(story.optString("headline", ""),
+                f(FontFactory.HELVETICA_BOLD, 20, Font.BOLD, C_TEXT_DARK));
+        headline.setLeading(25);
+        headCt.addElement(headline);
+        headCt.go();
+
+        // ── Horizontal rule under headline ────────────────────────────────────
+        cb.setColorStroke(C_RULE);
+        cb.setLineWidth(0.8f);
+        cb.moveTo(lm, h - 120);
+        cb.lineTo(w - rm, h - 120);
+        cb.stroke();
+
+        // ── Body content column ───────────────────────────────────────────────
+        ColumnText ct = new ColumnText(cb);
+        ct.setSimpleColumn(lm, 68, w - rm, h - 130);
+
+        // ── 1. WHAT HAPPENED ─────────────────────────────────────────────────
+        ct.addElement(smallBadge("1. WHAT HAPPENED", C_GOLD));
+        ct.addElement(spacer(5));
+
+        Paragraph whatPara = new Paragraph(story.optString("what_happened", ""),
+                f(FontFactory.TIMES_ROMAN, 10.5f, Font.NORMAL, C_TEXT_MID));
+        whatPara.setAlignment(Element.ALIGN_JUSTIFIED);
+        whatPara.setLeading(15.5f);
+        ct.addElement(whatPara);
+
+        ct.addElement(spacer(14));
+
+        // ── 2. ACTUALLY, WHAT THIS MEANS  (inset card — matches image's blue panel) ──
+        ct.addElement(buildPanel(
+                "2. ACTUALLY, WHAT THIS MEANS",
+                story.optString("plain_english", ""),
+                C_CARD, C_TAN, C_TEXT_LITE));
+
+        ct.addElement(spacer(14));
+
+        // ── 3. REALITY CHECK  (sarcasm, gold left-border quote) ──────────────
+        ct.addElement(smallBadge("3. REALITY CHECK", C_TAN));
+        ct.addElement(spacer(4));
+        ct.addElement(buildQuote(story.optString("sarcasm", "")));
+
+        ct.addElement(spacer(14));
+
+        // ── Sources ───────────────────────────────────────────────────────────
+        ct.addElement(new Paragraph(
+                "SOURCES: " + story.optString("sources", ""),
+                f(FontFactory.HELVETICA, 7.5f, Font.NORMAL, C_MUTED)));
+
+        ct.go();
     }
 
-    private static void addStoryCard(Document doc, JSONObject story, int num, Color accent) throws Exception {
+    // ─── Panel (inset card block matching image blue panel) ──────────────────
+    private static PdfPTable buildPanel(String label, String body,
+                                        Color bg, Color labelColor, Color textColor) {
+        PdfPTable card = new PdfPTable(1);
+        card.setWidthPercentage(100);
 
-        // ── Story number + headline ──────────────────────────────────────────
-        PdfPTable headerTable = new PdfPTable(new float[]{0.07f, 0.93f});
-        headerTable.setWidthPercentage(100);
-        headerTable.setSpacingBefore(14);
+        PdfPCell cell = new PdfPCell();
+        cell.setBackgroundColor(bg);
+        cell.setBorder(PdfPCell.NO_BORDER);
+        cell.setPaddingLeft(14);
+        cell.setPaddingRight(14);
+        cell.setPaddingTop(12);
+        cell.setPaddingBottom(12);
 
-        PdfPCell numCell = new PdfPCell(new Paragraph(String.valueOf(num),
-                font(FontFactory.HELVETICA_BOLD, 12, Font.BOLD, Color.WHITE)));
-        numCell.setBackgroundColor(accent);
-        numCell.setBorder(Rectangle.NO_BORDER);
-        numCell.setHorizontalAlignment(Element.ALIGN_CENTER);
-        numCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
-        numCell.setPadding(6);
-        headerTable.addCell(numCell);
+        // Badge inside card
+        Paragraph lp = new Paragraph(label,
+                f(FontFactory.HELVETICA_BOLD, 8, Font.BOLD, labelColor));
+        lp.setSpacingAfter(7);
+        cell.addElement(lp);
 
-        PdfPCell headlineCell = new PdfPCell(new Paragraph(
-                story.optString("headline", ""),
-                font(FontFactory.HELVETICA_BOLD, 12, Font.BOLD, COLOR_TEXT_PRIMARY)));
-        headlineCell.setBackgroundColor(COLOR_CARD_BG);
-        headlineCell.setBorder(PdfPCell.NO_BORDER);
-        headlineCell.enableBorderSide(PdfPCell.BOTTOM);
-        headlineCell.setBorderColorBottom(accent);
-        headlineCell.setBorderWidthBottom(2f);
-        headlineCell.setPadding(8);
-        headerTable.addCell(headlineCell);
+        Paragraph bp = new Paragraph(body,
+                f(FontFactory.HELVETICA, 10, Font.ITALIC, textColor));
+        bp.setAlignment(Element.ALIGN_JUSTIFIED);
+        bp.setLeading(15);
+        cell.addElement(bp);
 
-        doc.add(headerTable);
+        card.addCell(cell);
+        return card;
+    }
 
-        // ── Card body ────────────────────────────────────────────────────────
-        PdfPTable body = new PdfPTable(1);
-        body.setWidthPercentage(100);
+    // ─── Quote block (sarcasm — gold left border, italic) ────────────────────
+    private static PdfPTable buildQuote(String text) {
+        PdfPTable t = new PdfPTable(new float[]{0.02f, 0.98f});
+        t.setWidthPercentage(100);
 
-        PdfPCell bodyCell = new PdfPCell();
-        bodyCell.setBackgroundColor(new Color(22, 28, 45));
-        bodyCell.setBorder(PdfPCell.NO_BORDER);
-        bodyCell.enableBorderSide(PdfPCell.LEFT);
-        bodyCell.enableBorderSide(PdfPCell.RIGHT);
-        bodyCell.enableBorderSide(PdfPCell.BOTTOM);
-        bodyCell.setBorderColorLeft(COLOR_SEPARATOR);
-        bodyCell.setBorderColorRight(COLOR_SEPARATOR);
-        bodyCell.setBorderColorBottom(COLOR_SEPARATOR);
-        bodyCell.setBorderWidth(1f);
-        bodyCell.setPadding(12);
+        PdfPCell bar = new PdfPCell();
+        bar.setBackgroundColor(C_GOLD);
+        bar.setBorder(PdfPCell.NO_BORDER);
+        t.addCell(bar);
 
-        // What Happened
-        bodyCell.addElement(labeledSection("WHAT HAPPENED", accent));
-        bodyCell.addElement(new Paragraph(story.optString("what_happened", ""),
-                font(FontFactory.TIMES_ROMAN, 10, Font.NORMAL, COLOR_TEXT_PRIMARY)));
+        PdfPCell tc = new PdfPCell();
+        tc.setBorder(PdfPCell.NO_BORDER);
+        tc.setPaddingLeft(10);
+        tc.setPaddingTop(3);
+        tc.setPaddingBottom(3);
+        Paragraph p = new Paragraph(text,
+                f(FontFactory.HELVETICA, 10, Font.ITALIC, C_TEXT_MID));
+        p.setAlignment(Element.ALIGN_JUSTIFIED);
+        p.setLeading(14.5f);
+        tc.addElement(p);
+        t.addCell(tc);
 
-        // Plain English
-        bodyCell.addElement(spacer(8));
-        bodyCell.addElement(labeledSection("PLAIN ENGLISH", new Color(100, 220, 180)));
-        Paragraph plainPara = new Paragraph(story.optString("plain_english", ""),
-                font(FontFactory.HELVETICA, 10, Font.ITALIC, new Color(200, 240, 220)));
-        plainPara.setIndentationLeft(10);
-        bodyCell.addElement(plainPara);
+        return t;
+    }
 
-        // Sarcasm
-        bodyCell.addElement(spacer(8));
-        bodyCell.addElement(labeledSection("REALITY CHECK", new Color(255, 140, 90)));
-        Paragraph sarcasmPara = new Paragraph(story.optString("sarcasm", ""),
-                font(FontFactory.HELVETICA, 10, Font.ITALIC, new Color(255, 200, 150)));
-        sarcasmPara.setIndentationLeft(10);
-        bodyCell.addElement(sarcasmPara);
-
-        // Sources
-        bodyCell.addElement(spacer(6));
-        Paragraph srcPara = new Paragraph("SOURCES: " + story.optString("sources", ""),
-                font(FontFactory.HELVETICA, 8, Font.NORMAL, COLOR_TEXT_SECONDARY));
-        bodyCell.addElement(srcPara);
-
-        body.addCell(bodyCell);
-        doc.add(body);
+    // ─── Small badge label ────────────────────────────────────────────────────
+    private static Paragraph smallBadge(String text, Color color) {
+        Paragraph p = new Paragraph(text,
+                f(FontFactory.HELVETICA_BOLD, 8, Font.BOLD, color));
+        p.setSpacingBefore(2);
+        return p;
     }
 
     // ═════════════════════════════════════════════════════════════════════════
     // BIGGEST STORIES
     // ═════════════════════════════════════════════════════════════════════════
-    private static void addBiggestStories(Document doc, PdfWriter writer, JSONObject biggest) throws Exception {
-        PdfContentByte cb = writer.getDirectContent();
-        float w = doc.getPageSize().getWidth();
+    private static void addBiggestPage(Document doc, PdfWriter writer, JSONObject biggest) throws Exception {
+        paintBg(writer);
+        paintTopBar(writer, "TODAY'S BIGGEST STORIES", C_GOLD);
+        doc.add(spacer(44));
 
-        addPageHeader(cb, "TODAY'S BIGGEST STORIES", COLOR_ACCENT_GOLD, w);
-        doc.add(spacer(50));
+        String[] keys   = {"global", "nepal", "tech"};
+        String[] labels = {"GLOBAL TOP STORY", "NEPAL TOP STORY", "TECH TOP STORY"};
+        Color[]  colors = SECTION_ACCENT;
 
-        String[][] keys = {
-                {"global", "GLOBAL", "SECTION_COLORS[0]"},
-                {"nepal",  "NEPAL",  ""},
-                {"tech",   "TECH",   ""}
-        };
-        Color[] bColors = {SECTION_COLORS[0], SECTION_COLORS[1], SECTION_COLORS[2]};
-        String[] labels = {"GLOBAL", "NEPAL", "TECH"};
+        for (int i = 0; i < keys.length; i++) {
+            if (!biggest.has(keys[i])) continue;
+            JSONObject s = biggest.getJSONObject(keys[i]);
 
-        String[] jsonKeys = {"global", "nepal", "tech"};
-        for (int i = 0; i < jsonKeys.length; i++) {
-            if (!biggest.has(jsonKeys[i])) continue;
-            JSONObject s = biggest.getJSONObject(jsonKeys[i]);
-            addBigCard(doc, labels[i], s.optString("headline"), s.optString("summary"), bColors[i]);
+            PdfPTable t = new PdfPTable(1);
+            t.setWidthPercentage(100);
+            t.setSpacingBefore(14);
+
+            PdfPCell cell = new PdfPCell();
+            cell.setBackgroundColor(C_CARD);
+            cell.setBorder(PdfPCell.NO_BORDER);
+            cell.enableBorderSide(PdfPCell.LEFT);
+            cell.setBorderColorLeft(colors[i]);
+            cell.setBorderWidthLeft(5f);
+            cell.setPadding(14);
+
+            cell.addElement(new Paragraph("★  " + labels[i],
+                    f(FontFactory.HELVETICA_BOLD, 9, Font.BOLD, colors[i])));
+            cell.addElement(spacer(4));
+            cell.addElement(new Paragraph(s.optString("headline"),
+                    f(FontFactory.HELVETICA_BOLD, 13, Font.BOLD, C_TEXT_LITE)));
+            cell.addElement(spacer(5));
+            cell.addElement(new Paragraph(s.optString("summary"),
+                    f(FontFactory.TIMES_ROMAN, 10, Font.NORMAL, C_TAN)));
+
+            t.addCell(cell);
+            doc.add(t);
         }
     }
 
-    private static void addBigCard(Document doc, String label, String headline, String summary, Color color) throws Exception {
-        PdfPTable table = new PdfPTable(1);
-        table.setWidthPercentage(100);
-        table.setSpacingBefore(16);
+    // ═════════════════════════════════════════════════════════════════════════
+    // PAGE BG + TOP BAR
+    // ═════════════════════════════════════════════════════════════════════════
+    private static void paintBg(PdfWriter writer) {
+        PdfContentByte cb = writer.getDirectContentUnder();
+        float w = PageSize.A4.getWidth();
+        float h = PageSize.A4.getHeight();
+        cb.setColorFill(C_PAGE_BG);
+        cb.rectangle(0, 0, w, h);
+        cb.fill();
+    }
 
-        PdfPCell cell = new PdfPCell();
-        cell.setBackgroundColor(COLOR_CARD_BG);
-        cell.setBorder(PdfPCell.NO_BORDER);
-        cell.enableBorderSide(PdfPCell.LEFT);
-        cell.setBorderColorLeft(color);
-        cell.setBorderWidthLeft(5f);
-        cell.setPadding(14);
-
-        Paragraph labelPara = new Paragraph("★  " + label + " TOP STORY",
-                font(FontFactory.HELVETICA_BOLD, 10, Font.BOLD, color));
-        cell.addElement(labelPara);
-        cell.addElement(spacer(4));
-        cell.addElement(new Paragraph(headline,
-                font(FontFactory.HELVETICA_BOLD, 13, Font.BOLD, COLOR_TEXT_PRIMARY)));
-        cell.addElement(spacer(6));
-        cell.addElement(new Paragraph(summary,
-                font(FontFactory.TIMES_ROMAN, 11, Font.NORMAL, COLOR_TEXT_SECONDARY)));
-
-        table.addCell(cell);
-        doc.add(table);
+    private static void paintTopBar(PdfWriter writer, String text, Color barColor) {
+        PdfContentByte cb = writer.getDirectContent();
+        float w = PageSize.A4.getWidth();
+        float h = PageSize.A4.getHeight();
+        cb.setColorFill(barColor);
+        cb.rectangle(0, h - 38, w, 38);
+        cb.fill();
+        ColumnText.showTextAligned(cb, Element.ALIGN_CENTER,
+                new Phrase(text, f(FontFactory.HELVETICA_BOLD, 13, Font.BOLD, C_TEXT_DARK)),
+                w / 2, h - 23, 0);
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // PAGE DECORATOR (footer / page numbers)
+    // FOOTER
     // ═════════════════════════════════════════════════════════════════════════
-    static class PageDecorator extends PdfPageEventHelper {
+    static class FooterPainter extends PdfPageEventHelper {
         @Override
         public void onEndPage(PdfWriter writer, Document doc) {
             PdfContentByte cb = writer.getDirectContent();
-            float w = doc.getPageSize().getWidth();
-            float h = doc.getPageSize().getHeight();
+            float w = PageSize.A4.getWidth();
 
-            // Footer line
-            cb.setColorStroke(COLOR_SEPARATOR);
+            cb.setColorStroke(C_RULE);
             cb.setLineWidth(0.5f);
-            cb.moveTo(40, 45);
-            cb.lineTo(w - 40, 45);
+            cb.moveTo(50, 56);
+            cb.lineTo(w - 50, 56);
             cb.stroke();
 
-            // Page number
-            ColumnText.showTextAligned(cb, Element.ALIGN_CENTER,
-                    new Phrase(String.valueOf(writer.getPageNumber()),
-                            FontFactory.getFont(FontFactory.HELVETICA, 8, Font.NORMAL, COLOR_TEXT_SECONDARY)),
-                    w / 2, 30, 0);
-
-            // Footer text
             ColumnText.showTextAligned(cb, Element.ALIGN_LEFT,
                     new Phrase("Daily Intelligence Report",
-                            FontFactory.getFont(FontFactory.HELVETICA, 8, Font.ITALIC, COLOR_TEXT_SECONDARY)),
-                    40, 30, 0);
+                            FontFactory.getFont(FontFactory.HELVETICA, 7, Font.ITALIC, C_MUTED)),
+                    50, 42, 0);
 
-            // Right footer
+            ColumnText.showTextAligned(cb, Element.ALIGN_CENTER,
+                    new Phrase(String.valueOf(writer.getPageNumber()),
+                            FontFactory.getFont(FontFactory.HELVETICA, 8, Font.BOLD, C_TEXT_MID)),
+                    w / 2, 42, 0);
+
             ColumnText.showTextAligned(cb, Element.ALIGN_RIGHT,
-                    new Phrase("Confidential · Personal Use",
-                            FontFactory.getFont(FontFactory.HELVETICA, 8, Font.ITALIC, COLOR_TEXT_SECONDARY)),
-                    w - 40, 30, 0);
+                    new Phrase("Personal Use Only",
+                            FontFactory.getFont(FontFactory.HELVETICA, 7, Font.ITALIC, C_MUTED)),
+                    w - 50, 42, 0);
 
-            // Gold bottom bar
-            cb.setColorFill(COLOR_ACCENT_GOLD);
-            cb.rectangle(0, 0, w, 3);
+            cb.setColorFill(C_GOLD);
+            cb.rectangle(0, 0, w, 5);
             cb.fill();
         }
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // HELPERS
+    // SPACER
     // ═════════════════════════════════════════════════════════════════════════
-
-    private static void addPageHeader(PdfContentByte cb, String text, Color color, float pageWidth) {
-        // Dark banner
-        cb.setColorFill(color);
-        cb.rectangle(0, PageSize.A4.getHeight() - 50, pageWidth, 50);
-        cb.fill();
-
-        ColumnText.showTextAligned(cb, Element.ALIGN_CENTER,
-                new Phrase(text, FontFactory.getFont(FontFactory.HELVETICA_BOLD, 14, Font.BOLD, Color.WHITE)),
-                pageWidth / 2, PageSize.A4.getHeight() - 30, 0);
-    }
-
-    private static Paragraph labeledSection(String label, Color color) {
-        Font f = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8, Font.BOLD, color);
-        Paragraph p = new Paragraph("▶ " + label, f);
-        p.setSpacingBefore(4);
-        return p;
-    }
-
-    private static Paragraph para(String text, Font font, int align) {
-        Paragraph p = new Paragraph(text, font);
-        p.setAlignment(align);
-        return p;
-    }
-
-    private static Element spacer(float height) {
+    private static Element spacer(float h) {
         Paragraph p = new Paragraph(" ");
-        p.setLeading(height);
+        p.setLeading(h);
         return p;
-    }
-
-    private static Element hRule(PdfContentByte cb, int width) {
-        // Return empty paragraph — visual line drawn separately via canvas
-        Paragraph p = new Paragraph(" ");
-        p.setLeading(1);
-        return p;
-    }
-
-    private static void addBadge(Phrase parent, String text, Color bg) {
-        // Simple colored text badge (OpenPDF doesn't support Chunk background natively in all versions)
-        Chunk chunk = new Chunk(" " + text + " ",
-                FontFactory.getFont(FontFactory.HELVETICA_BOLD, 10, Font.BOLD, bg));
-        parent.add(chunk);
-        parent.add(new Chunk("  "));
-    }
-
-    private static void roundRect(PdfContentByte cb, float x, float y, float w, float h, float r) {
-        cb.roundRectangle(x, y, w, h, r);
     }
 }
