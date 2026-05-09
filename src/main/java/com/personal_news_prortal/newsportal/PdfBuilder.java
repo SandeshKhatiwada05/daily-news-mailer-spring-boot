@@ -27,17 +27,17 @@ import java.time.format.DateTimeFormatter;
 public class PdfBuilder {
 
     // ── Palette ──────────────────────────────────────────────────────────────
-    private static final Color C_PAGE_BG   = new Color(232, 221, 180);   // #E8DDB4
-    private static final Color C_CARD      = new Color(118, 127, 158);   // #767F9E
-    private static final Color C_GOLD      = new Color(218, 164, 100);   // #DAA464
-    private static final Color C_TAN       = new Color(222, 195, 132);   // #DEC384
-    private static final Color C_TEXT_DARK = new Color(38,  38,  38);    // body text on light bg
-    private static final Color C_TEXT_MID  = new Color(65,  65,  65);    // secondary body
-    private static final Color C_TEXT_LITE = new Color(245, 240, 232);   // text on dark card bg
-    private static final Color C_MUTED     = new Color(105, 100,  90);   // sources / footer
-    private static final Color C_RULE      = new Color(200, 188, 148);   // separator lines
+    private static final Color C_PAGE_BG   = new Color(250, 250, 248);   // #FAFAF8 near-white
+    private static final Color C_CARD      = new Color(118, 127, 158);   // #767F9E slate-blue
+    private static final Color C_GOLD      = new Color(218, 164, 100);   // #DAA464 warm gold
+    private static final Color C_TAN       = new Color(222, 195, 132);   // #DEC384 lighter gold
+    private static final Color C_TEXT_DARK = new Color(28,  28,  28);    // headline
+    private static final Color C_TEXT_MID  = new Color(55,  55,  55);    // body on white
+    private static final Color C_TEXT_LITE = new Color(255, 255, 255);   // text on slate card
+    private static final Color C_MUTED     = new Color(150, 145, 140);   // sources / footer
+    private static final Color C_RULE      = new Color(218, 218, 218);   // rule under headline
 
-    private static final Color[] SECTION_ACCENT = { C_GOLD, C_TAN, new Color(195, 170, 100) };
+    private static final Color[] SECTION_ACCENT = { C_GOLD, C_GOLD, C_GOLD };
 
     // ── Font helper ───────────────────────────────────────────────────────────
     private static Font f(String base, float size, int style, Color color) {
@@ -287,11 +287,22 @@ public class PdfBuilder {
         cell.setPaddingTop(12);
         cell.setPaddingBottom(12);
 
-        // Badge inside card
-        Paragraph lp = new Paragraph(label,
-                f(FontFactory.HELVETICA_BOLD, 8, Font.BOLD, labelColor));
-        lp.setSpacingAfter(7);
-        cell.addElement(lp);
+        // Badge inside card — gold pill on slate background
+        PdfPTable badge = new PdfPTable(1);
+        badge.setWidthPercentage(55);
+        badge.setHorizontalAlignment(Element.ALIGN_LEFT);
+        badge.setSpacingAfter(9);
+        PdfPCell bc = new PdfPCell();
+        bc.setBackgroundColor(labelColor);
+        bc.setBorder(PdfPCell.NO_BORDER);
+        bc.setPaddingTop(3);
+        bc.setPaddingBottom(4);
+        bc.setPaddingLeft(7);
+        bc.setPaddingRight(7);
+        bc.addElement(new Paragraph(label,
+                f(FontFactory.HELVETICA_BOLD, 7.5f, Font.BOLD, C_TEXT_DARK)));
+        badge.addCell(bc);
+        cell.addElement(badge);
 
         Paragraph bp = new Paragraph(body,
                 f(FontFactory.HELVETICA, 10, Font.ITALIC, textColor));
@@ -328,12 +339,26 @@ public class PdfBuilder {
         return t;
     }
 
-    // ─── Small badge label ────────────────────────────────────────────────────
-    private static Paragraph smallBadge(String text, Color color) {
+    // ─── Small badge label — filled gold pill (matches reference image exactly) ──
+    private static PdfPTable smallBadge(String text, Color bgColor) {
+        PdfPTable t = new PdfPTable(1);
+        t.setWidthPercentage(38);
+        t.setHorizontalAlignment(Element.ALIGN_LEFT);
+        t.setSpacingBefore(4);
+        t.setSpacingAfter(5);
+
+        PdfPCell c = new PdfPCell();
+        c.setBackgroundColor(bgColor);
+        c.setBorder(PdfPCell.NO_BORDER);
+        c.setPaddingTop(3);
+        c.setPaddingBottom(4);
+        c.setPaddingLeft(8);
+        c.setPaddingRight(8);
         Paragraph p = new Paragraph(text,
-                f(FontFactory.HELVETICA_BOLD, 8, Font.BOLD, color));
-        p.setSpacingBefore(2);
-        return p;
+                f(FontFactory.HELVETICA_BOLD, 7.5f, Font.BOLD, C_TEXT_DARK));
+        c.addElement(p);
+        t.addCell(c);
+        return t;
     }
 
     // ═════════════════════════════════════════════════════════════════════════
