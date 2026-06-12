@@ -2,7 +2,7 @@ name: Daily News
 
 on:
   schedule:
-    - cron: '0 0 * * *'   # 00:00 UTC = 05:45 NPT → email arrives ~06:00 NPT
+    - cron: '0 0 * * 6,0'
   workflow_dispatch:
 
 jobs:
